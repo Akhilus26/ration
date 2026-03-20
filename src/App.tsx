@@ -14,6 +14,9 @@ import AdminUsersPage from "./pages/AdminUsersPage";
 import AdminShopsPage from "./pages/AdminShopsPage";
 import AdminQuotaSettings from "./pages/AdminQuotaSettings";
 import AdminSettings from "./pages/AdminSettings";
+import AdminDistribution from "./pages/AdminDistribution";
+import AdminAnalytics from "./pages/AdminAnalytics";
+import AdminStockReport from "./pages/AdminStockReport";
 import ShopkeeperDashboard from "./pages/ShopkeeperDashboard";
 import ShopkeeperStock from "./pages/ShopkeeperStock";
 import ShopkeeperDeliveryBoys from "./pages/ShopkeeperDeliveryBoys";
@@ -28,6 +31,7 @@ import NotificationsPage from "./pages/NotificationsPage";
 import WalletPage from "./pages/WalletPage";
 import ExtraShopsPage from "./pages/ExtraShopsPage";
 import NotFound from "./pages/NotFound";
+import ProfilePage from "./pages/ProfilePage";
 
 const queryClient = new QueryClient();
 
@@ -53,6 +57,7 @@ const App = () => (
             <Route path="/beneficiary/wallet" element={<DashboardLayout><WalletPage /></DashboardLayout>} />
             <Route path="/beneficiary/extra-shops" element={<DashboardLayout><ExtraShopsPage /></DashboardLayout>} />
             <Route path="/beneficiary/notifications" element={<DashboardLayout><NotificationsPage /></DashboardLayout>} />
+            <Route path="/beneficiary/profile" element={<DashboardLayout><ProfilePage /></DashboardLayout>} />
 
             {/* Shopkeeper */}
             <Route path="/shopkeeper" element={<DashboardLayout><ShopkeeperDashboard /></DashboardLayout>} />
@@ -66,15 +71,17 @@ const App = () => (
             {/* Delivery Boy */}
             <Route path="/delivery-boy" element={<DashboardLayout><DeliveryBoyDashboard /></DashboardLayout>} />
             <Route path="/delivery-boy/active" element={<DashboardLayout><DeliveryBoyDashboard /></DashboardLayout>} />
-            <Route path="/delivery-boy/history" element={<DashboardLayout><OrdersPage /></DashboardLayout>} />
+            <Route path="/delivery-boy/history" element={<DashboardLayout><DeliveryBoyDashboard /></DashboardLayout>} />
             <Route path="/delivery-boy/notifications" element={<DashboardLayout><NotificationsPage /></DashboardLayout>} />
 
             {/* Admin */}
             <Route path="/admin" element={<DashboardLayout><AdminDashboard /></DashboardLayout>} />
+            <Route path="/admin/analytics" element={<DashboardLayout><AdminAnalytics /></DashboardLayout>} />
+            <Route path="/admin/stock-report" element={<DashboardLayout><AdminStockReport /></DashboardLayout>} />
             <Route path="/admin/users" element={<DashboardLayout><AdminUsersPage /></DashboardLayout>} />
             <Route path="/admin/shops" element={<DashboardLayout><AdminShopsPage /></DashboardLayout>} />
             <Route path="/admin/products" element={<DashboardLayout><NotificationsPage /></DashboardLayout>} />
-            <Route path="/admin/distribution" element={<DashboardLayout><NotificationsPage /></DashboardLayout>} />
+            <Route path="/admin/distribution" element={<DashboardLayout><AdminDistribution /></DashboardLayout>} />
             <Route path="/admin/quota" element={<DashboardLayout><AdminQuotaSettings /></DashboardLayout>} />
             <Route path="/admin/settings" element={<DashboardLayout><AdminSettings /></DashboardLayout>} />
             <Route path="/admin/notifications" element={<DashboardLayout><NotificationsPage /></DashboardLayout>} />

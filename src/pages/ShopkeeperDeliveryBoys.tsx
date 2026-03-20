@@ -15,6 +15,8 @@ const ShopkeeperDeliveryBoys = () => {
     const [deliveryBoys, setDeliveryBoys] = useState<User[]>([]);
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
+    const [hiringLimit, setHiringLimit] = useState(1); // Default minimum
+    const [avgOrders, setAvgOrders] = useState(0);
 
     const [formData, setFormData] = useState({
         name: "",
@@ -35,6 +37,13 @@ const ShopkeeperDeliveryBoys = () => {
             setShop(s);
             const boys = await sql.getDeliveryBoysByShop(s.id);
             setDeliveryBoys(boys);
+            
+            // Calculate hiring limit
+            const avg = await sql.getAverageOrdersPerHour(s.id);
+            setAvgOrders(avg);
+            // Limit = Math.ceil(avg/10), minimum 1
+            const calculatedLimit = Math.max(1, Math.ceil(avg / 10));
+            setHiringLimit(calculatedLimit);
         }
         setLoading(false);
     };
@@ -42,6 +51,12 @@ const ShopkeeperDeliveryBoys = () => {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!shop) return;
+        
+        if (deliveryBoys.length >= hiringLimit) {
+            toast.error(`Hiring limit reached (${hiringLimit} boys). You need more average orders per hour to hire more.`);
+            return;
+        }
+
         setSubmitting(true);
 
         try {
@@ -80,6 +95,19 @@ const ShopkeeperDeliveryBoys = () => {
             <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
                 <h1 className="text-2xl font-bold text-foreground">Manage Delivery Boys</h1>
                 <p className="text-muted-foreground mt-1">Register and manage delivery personnel for {shop?.name}</p>
+                <div className="mt-4 p-4 rounded-xl bg-primary/5 border border-primary/10 flex items-center justify-between">
+                    <div>
+                        <p className="text-sm font-semibold text-primary">Efficiency Metrics</p>
+                        <p className="text-xs text-muted-foreground">Based on completed delivery history</p>
+                    </div>
+                    <div className="text-right">
+                        <p className="text-lg font-bold text-primary">{deliveryBoys.length} / {hiringLimit}</p>
+                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Boys Hired / Hiring Quota</p>
+                    </div>
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-2 italic">
+                    * Hiring quota is calculated as 1 boy per 10 average orders per hour (Minimum 1). Current Avg: {avgOrders.toFixed(2)} orders/hr
+                </p>
             </motion.div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -127,10 +155,19 @@ const ShopkeeperDeliveryBoys = () => {
                                     autoComplete="off"
                                 />
                             </div>
-                            <Button type="submit" className="w-full gradient-saffron" disabled={submitting}>
-                                {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                Add Delivery Boy
+                            <Button 
+                                type="submit" 
+                                className="w-full gradient-saffron" 
+                                disabled={submitting || deliveryBoys.length >= hiringLimit}
+                            >
+                                {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-4 w-4" />}
+                                {deliveryBoys.length >= hiringLimit ? "Limit Reached" : "Add Delivery Boy"}
                             </Button>
+                            {deliveryBoys.length >= hiringLimit && (
+                                <p className="text-[10px] text-destructive text-center mt-2 font-medium">
+                                    Increase your average orders to hire more boys.
+                                </p>
+                            )}
                         </form>
                     </CardContent>
                 </Card>

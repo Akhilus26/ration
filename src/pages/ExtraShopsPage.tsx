@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { motion } from "framer-motion";
 import { sql, type Shop } from "@/lib/db";
-import { Store, MapPin, Search, ShoppingBag, ArrowRight, Loader2, Navigation } from "lucide-react";
+import { Store, MapPin, Search, ShoppingBag, ArrowRight, Loader2, Navigation, Clock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Input } from "@/components/ui/input";
 
@@ -82,11 +82,7 @@ const ExtraShopsPage = () => {
                                     <div className="absolute top-3 right-3 flex gap-2">
                                         <Badge className="bg-indian-green text-white border-0">LOW RATE</Badge>
                                         {(() => {
-                                            const isShopOpen = shop.isManualOpen !== false && (!shop.openingTime || !shop.closingTime || (() => {
-                                                const now = new Date();
-                                                const current = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-                                                return current >= shop.openingTime && current <= shop.closingTime;
-                                            })());
+                                            const isShopOpen = sql.isShopOpen(shop);
                                             return (
                                                 <Badge variant={isShopOpen ? "secondary" : "destructive"} className={`text-[8px] h-5 border-0 ${isShopOpen ? "bg-indian-green text-white" : "bg-destructive text-white"}`}>
                                                     {isShopOpen ? "OPEN" : "CLOSED"}
@@ -98,12 +94,19 @@ const ExtraShopsPage = () => {
                                 <CardHeader className="pb-2">
                                     <CardTitle className="text-lg leading-tight">{shop.name}</CardTitle>
                                     <div className="flex flex-col gap-1 mt-1">
-                                        <p className="text-xs text-muted-foreground flex items-center gap-1">
-                                            <MapPin className="w-3 h-3" /> {shop.address}
-                                        </p>
-                                        <p className="text-[10px] font-bold text-indian-green flex items-center gap-1">
-                                            <Navigation className="w-2.5 h-2.5" /> {(shop as any).distance} km away
-                                        </p>
+                                        <div className="flex flex-wrap gap-1 mt-1">
+                                            <Badge variant="outline" className="text-[8px] h-3.5 border-primary/20 bg-primary/5 text-primary">
+                                                <Clock className="w-2 h-2 mr-1" /> {shop.openingTime || "09:00"} - {shop.closingTime || "17:00"}
+                                            </Badge>
+                                            {shop.lunchTime && (
+                                                <Badge variant="outline" className="text-[8px] h-3.5 border-accent/20 bg-accent/5 text-accent">
+                                                    Lunch: {shop.lunchTime}
+                                                </Badge>
+                                            )}
+                                            <Badge variant="outline" className="text-[8px] h-3.5 border-muted bg-muted/20">
+                                                {(shop as any).distance} km
+                                            </Badge>
+                                        </div>
                                     </div>
                                 </CardHeader>
                                 <CardContent className="flex-1 flex flex-col justify-end pt-4">

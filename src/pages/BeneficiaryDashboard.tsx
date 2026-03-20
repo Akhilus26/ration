@@ -20,6 +20,7 @@ import {
   Store,
   Wallet,
   Navigation,
+  Clock,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -47,11 +48,11 @@ const BeneficiaryDashboard = () => {
   const [allQuotas, setAllQuotas] = useState<any[]>([]);
 
   const loadBeneficiaryData = async () => {
-    if (!user?.id) return;
+    if (!user?.id) return null;
     setLoading(true);
 
     const [purchaseData, shopsInRadiusData, allShopsData, quotasData] = await Promise.all([
-      sql.getPurchases(user.id),
+      sql.getCurrentMonthPurchases(user.id),
       sql.findShopsByRadius(user.lat || 0, user.lng || 0, 10),
       sql.getAllShops(),
       sql.getAllQuotas()
@@ -63,17 +64,75 @@ const BeneficiaryDashboard = () => {
     setAvailableRationShops(filteredRationShops);
     setAllQuotas(quotasData);
 
+    let assignedShop = null;
     if (user.assignedShopId) {
-      const assigned = filteredRationShops.find(s => s.id === user.assignedShopId);
-      setCurrentShop(assigned || null);
+      assignedShop = filteredRationShops.find(s => s.id === user.assignedShopId) || null;
+      setCurrentShop(assignedShop);
     } else {
       setCurrentShop(null);
     }
     setLoading(false);
+    
+    return { purchaseData, quotasData };
   };
 
   useEffect(() => {
-    loadBeneficiaryData();
+    const fetchDataAndRemind = async () => {
+      const data = await loadBeneficiaryData();
+      
+      // Quota reminder logic
+      if (user && data) {
+        const { purchaseData, quotasData } = data;
+        const now = new Date();
+        const day = now.getDate();
+        const month = now.getMonth();
+        const year = now.getFullYear();
+
+        if (day >= 25) {
+          const notifications = await sql.getNotifications(user.id);
+          const thisMonthReminder = notifications.find(n => 
+            n.type === 'quota' && 
+            new Date(n.date).getMonth() === month && 
+            new Date(n.date).getFullYear() === year
+          );
+
+          if (!thisMonthReminder) {
+            const category = user.category || "PHH";
+            const userQuotas = quotasData.filter((q: any) => q.category === category);
+            
+            if (userQuotas.length > 0) {
+              const riceQuota = userQuotas.find((q: any) => q.itemName === "Rice");
+              const wheatQuota = userQuotas.find((q: any) => q.itemName === "Wheat");
+              
+              const riceUsed = purchaseData.filter((p: any) => p.itemName === "Rice").reduce((sum: number, p: any) => sum + p.amount, 0);
+              const wheatUsed = purchaseData.filter((p: any) => p.itemName === "Wheat").reduce((sum: number, p: any) => sum + p.amount, 0);
+              
+              const remainingRice = riceQuota ? Math.max(0, riceQuota.amount - riceUsed) : 0;
+              const remainingWheat = wheatQuota ? Math.max(0, wheatQuota.amount - wheatUsed) : 0;
+              
+              const lastDay = new Date(year, month + 1, 0).getDate();
+              const message = `this many ${remainingRice} rice, this many ${remainingWheat} wheat are ther tobuy whichwill end on ${lastDay}th`;
+              
+              await sql.createNotification({
+                id: crypto.randomUUID(),
+                userId: user.id,
+                title: "Quota Reminder",
+                message,
+                date: now.toISOString(),
+                read: false,
+                type: 'quota'
+              });
+
+              // Simulate email send
+              console.log(`Sending email to ${user.email || user.name}: ${message}`);
+              sonnerToast.info("Monthly quota reminder sent to your notifications and email.");
+            }
+          }
+        }
+      }
+    };
+
+    fetchDataAndRemind();
   }, [user]);
 
   const handleSelectShop = async (shopId: string) => {
@@ -131,22 +190,23 @@ const BeneficiaryDashboard = () => {
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <p className="text-xs font-bold text-foreground leading-tight truncate">{currentShop.name}</p>
-                {(() => {
-                  const isShopOpen = currentShop.isManualOpen !== false && (!currentShop.openingTime || !currentShop.closingTime || (() => {
-                    const now = new Date();
-                    const current = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-                    return current >= currentShop.openingTime && current <= currentShop.closingTime;
-                  })());
-                  return (
-                    <Badge variant={isShopOpen ? "secondary" : "destructive"} className={`text-[7px] px-1 h-3 font-black ${isShopOpen ? "bg-indian-green/20 text-indian-green border-indian-green/20" : ""}`}>
-                      {isShopOpen ? "OPEN" : "CLOSED"}
-                    </Badge>
-                  );
-                })()}
+                <Badge variant={sql.isShopOpen(currentShop) ? "secondary" : "destructive"} className={`text-[7px] px-1 h-3 font-black ${sql.isShopOpen(currentShop) ? "bg-indian-green/20 text-indian-green border-indian-green/20" : ""}`}>
+                  {sql.isShopOpen(currentShop) ? "OPEN" : "CLOSED"}
+                </Badge>
               </div>
               <p className="text-[10px] text-muted-foreground flex items-center gap-1 mt-0.5 truncate">
                 <MapPin className="w-2.5 h-2.5" /> {currentShop.address}
               </p>
+              <div className="mt-1 flex flex-wrap gap-2">
+                <Badge variant="outline" className="text-[8px] h-3.5 border-primary/20 bg-primary/5 text-primary">
+                  <Clock className="w-2 h-2 mr-1" /> {currentShop.openingTime || "09:00"} - {currentShop.closingTime || "17:00"}
+                </Badge>
+                {currentShop.lunchTime && (
+                  <Badge variant="outline" className="text-[8px] h-3.5 border-accent/20 bg-accent/5 text-accent">
+                    Lunch: {currentShop.lunchTime}
+                  </Badge>
+                )}
+              </div>
             </div>
             <Button variant="ghost" size="sm" className="h-7 text-[10px] px-2 ml-1" onClick={() => setCurrentShop(null)}>
               Change
@@ -166,11 +226,7 @@ const BeneficiaryDashboard = () => {
             <CardContent>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {availableRationShops.map(s => {
-                  const isShopOpen = s.isManualOpen !== false && (!s.openingTime || !s.closingTime || (() => {
-                    const now = new Date();
-                    const current = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-                    return current >= s.openingTime && current <= s.closingTime;
-                  })());
+                  const isShopOpen = sql.isShopOpen(s);
 
                   return (
                     <Card key={s.id} className="hover:border-primary cursor-pointer transition-all border-dashed" onClick={() => handleSelectShop(s.id)}>
@@ -186,9 +242,19 @@ const BeneficiaryDashboard = () => {
                             </Badge>
                           </div>
                           <p className="text-xs text-muted-foreground truncate">{s.address}</p>
-                          <Badge variant="outline" className="text-[9px] mt-1 h-4 border-primary/20 bg-primary/5 text-primary">
-                            {(s as any).distance} km away
-                          </Badge>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            <Badge variant="outline" className="text-[8px] h-3.5 border-primary/20 bg-primary/5 text-primary">
+                              {s.openingTime || "09:00"} - {s.closingTime || "17:00"}
+                            </Badge>
+                            {s.lunchTime && (
+                              <Badge variant="outline" className="text-[8px] h-3.5 border-accent/20 bg-accent/5 text-accent">
+                                Lunch: {s.lunchTime}
+                              </Badge>
+                            )}
+                            <Badge variant="outline" className="text-[8px] h-3.5 border-muted bg-muted/20">
+                              {(s as any).distance} km
+                            </Badge>
+                          </div>
                         </div>
                         <ArrowRight className="w-4 h-4 text-muted-foreground" />
                       </CardContent>

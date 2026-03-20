@@ -10,7 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 
 const AdminSettings = () => {
     const { toast } = useToast();
-    const [settings, setSettings] = useState({ deliveryCharge: 10 });
+    const [settings, setSettings] = useState({ deliveryCharge: 10, petrolAllowance: 50 });
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
 
@@ -18,7 +18,7 @@ const AdminSettings = () => {
         const fetchSettings = async () => {
             setLoading(true);
             const data = await sql.getSystemSettings();
-            if (data) setSettings(data as { deliveryCharge: number });
+            if (data) setSettings(data as { deliveryCharge: number, petrolAllowance: number });
             setLoading(false);
         };
         fetchSettings();
@@ -70,6 +70,23 @@ const AdminSettings = () => {
                             </div>
                             <p className="text-[10px] text-muted-foreground italic">
                                 This amount will be automatically added to orders when "Home Delivery" is selected.
+                            </p>
+                        </div>
+
+                        <div className="space-y-2 mt-4">
+                            <Label htmlFor="petrolAllowance">Petrol Allowance (₹/km)</Label>
+                            <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-bold">₹</span>
+                                <Input
+                                    id="petrolAllowance"
+                                    type="number"
+                                    className="pl-7"
+                                    value={settings.petrolAllowance}
+                                    onChange={(e) => setSettings({ ...settings, petrolAllowance: parseFloat(e.target.value) || 0 })}
+                                />
+                            </div>
+                            <p className="text-[10px] text-muted-foreground italic">
+                                This distance-based allowance will be added to delivery boy earnings.
                             </p>
                         </div>
 

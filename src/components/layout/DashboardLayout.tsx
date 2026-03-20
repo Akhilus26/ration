@@ -23,12 +23,14 @@ import {
   Users,
   BarChart3,
   Settings,
+  Settings2,
   Truck,
   ClipboardList,
   LogOut,
   Wheat,
   Wallet,
   Store,
+  Send,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -42,6 +44,7 @@ const roleMenus = {
     { title: "My Wallet", url: "/beneficiary/wallet", icon: Wallet },
     { title: "Extra Shops", url: "/beneficiary/extra-shops", icon: Store },
     { title: "Notifications", url: "/beneficiary/notifications", icon: Bell },
+    { title: "Profile", url: "/beneficiary/profile", icon: Users },
   ],
   shopkeeper: [
     { title: "Dashboard", url: "/shopkeeper", icon: LayoutDashboard },
@@ -55,8 +58,11 @@ const roleMenus = {
     { title: "Dashboard", url: "/admin", icon: LayoutDashboard },
     { title: "Users", url: "/admin/users", icon: Users },
     { title: "Manage Shops", url: "/admin/shops", icon: Package },
-    { title: "Distribution", url: "/admin/distribution", icon: BarChart3 },
+    { title: "Distribution", url: "/admin/distribution", icon: Send },
+    { title: "Inventory", url: "/admin/analytics", icon: BarChart3 },
+    { title: "Stock Report", url: "/admin/stock-report", icon: ClipboardList },
     { title: "Quota Settings", url: "/admin/quota", icon: Settings },
+    { title: "System Settings", url: "/admin/settings", icon: Settings2 },
     { title: "Notifications", url: "/admin/notifications", icon: Bell },
   ],
   delivery_boy: [

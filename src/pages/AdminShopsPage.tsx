@@ -161,6 +161,16 @@ const AdminShopsPage = () => {
                 // Update shopkeeper's assignedShopId
                 await sql.updateUser(shopkeeperId, { assignedShopId: newShopId });
 
+                // Notify nearby beneficiaries
+                await sql.notifyNearbyUsers(
+                    28.6139, // Use default or random lat if not provided
+                    77.2090, // Use default or random lng if not provided
+                    10,
+                    "New Shop Registered",
+                    `new shop ${formData.name} is approved by the admin that with in 10 km`,
+                    'shop'
+                );
+
                 toast({ title: "Success", description: "New shop registered." });
             }
             setIsModalOpen(false);
@@ -189,7 +199,20 @@ const AdminShopsPage = () => {
 
     const handleApproveShop = async (shopId: string) => {
         try {
+            const shop = await sql.getShopById(shopId);
             await sql.approveShop(shopId);
+            
+            if (shop && shop.lat && shop.lng) {
+                await sql.notifyNearbyUsers(
+                    shop.lat,
+                    shop.lng,
+                    10,
+                    "Shop Approved",
+                    `new shop ${shop.name} is approved by the admin that with in 10 km`,
+                    'shop'
+                );
+            }
+
             toast({ title: "Shop Approved", description: "The shop is now active and ready for assignment." });
             fetchData();
         } catch (error: any) {

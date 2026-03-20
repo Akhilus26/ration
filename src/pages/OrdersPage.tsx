@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 import { Package, Truck, CheckCircle2, Clock, MapPin, IndianRupee } from "lucide-react";
 import { sql, type Order } from "@/lib/db";
@@ -100,10 +101,25 @@ const OrdersPage = () => {
                       <p className="text-xs text-muted-foreground">Total Paid</p>
                       <p className="text-xl font-black text-foreground">₹{order.totalAmount?.toFixed(1) || "0.0"}</p>
                       {(order.deliveryCharge || 0) > 0 && (
-                        <p className="text-[9px] text-muted-foreground mt-1 font-medium">Incl. ₹{order.deliveryCharge} fee</p>
+                        <p className="text-[9px] text-muted-foreground mt-1 font-medium">Incl. ₹{order.deliveryCharge} delivery fee</p>
                       )}
-                      {(order.tipAmount || 0) > 0 && (
-                        <p className="text-[9px] text-indian-green mt-0.5 font-bold">+ ₹{order.tipAmount} tip</p>
+                      
+                      {order.status !== "delivered" && order.status !== "completed" && order.status !== "cancelled" && (
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="mt-3 text-[10px] h-7 text-destructive hover:bg-destructive/10"
+                          onClick={() => {
+                            const reason = window.prompt("Reason for cancellation?");
+                            if (reason) {
+                              sql.cancelOrder(order.id, reason, "beneficiary").then(() => {
+                                window.location.reload();
+                              });
+                            }
+                          }}
+                        >
+                          Cancel Order
+                        </Button>
                       )}
                     </div>
                   </div>

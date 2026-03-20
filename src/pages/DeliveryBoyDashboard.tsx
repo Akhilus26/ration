@@ -3,23 +3,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
-import { sql, Order, Shop, db } from "@/lib/db";
+import { sql, Order, Shop, db, calculateDistance } from "@/lib/db";
+import { optimizeRoute, getDeliverySlot } from "@/lib/deliveryLogic";
 import { motion, AnimatePresence } from "framer-motion";
-import { Truck, MapPin, Package, Navigation, CheckCircle2, Clock, Loader2, ArrowRight } from "lucide-react";
+import { Truck, MapPin, Package, Navigation, CheckCircle2, Clock, Loader2, ArrowRight, IndianRupee, ClipboardList, History as HistoryIcon, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
-
-// Haversine formula to calculate distance between two points in km
-const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-    const R = 6371; // Radius of the earth in km
-    const dLat = (lat2 - lat1) * (Math.PI / 180);
-    const dLon = (lon2 - lon1) * (Math.PI / 180);
-    const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
-        Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
-};
+import { useLocation } from "react-router-dom";
 
 const DeliveryBoyDashboard = () => {
     const { user } = useAuth();
@@ -28,12 +17,49 @@ const DeliveryBoyDashboard = () => {
     const [loading, setLoading] = useState(true);
     const [route, setRoute] = useState<Order[]>([]);
     const [isReady, setIsReady] = useState(false);
+    const [isLunch, setIsLunch] = useState(false);
+    const [view, setView] = useState<"active" | "history">("active");
+    const [allAssignedOrders, setAllAssignedOrders] = useState<Order[]>([]);
+    const [timeLeft, setTimeLeft] = useState<{ m: number, s: number } | null>(null);
+    const location = useLocation();
     const mapRef = useRef<HTMLDivElement>(null);
     const mapInstance = useRef<any>(null);
 
     useEffect(() => {
+        if (location.pathname.includes("/history")) setView("history");
+        else setView("active");
+    }, [location]);
+
+    useEffect(() => {
+        const timer = setInterval(() => {
+            const now = new Date();
+            const minutes = now.getMinutes();
+            const seconds = now.getSeconds();
+            setTimeLeft({ m: 59 - minutes, s: 59 - seconds });
+        }, 1000);
+        return () => clearInterval(timer);
+    }, []);
+
+    useEffect(() => {
         if (user?.id) {
             loadData();
+
+            // Real-time location tracking
+            let watcher: number | null = null;
+            if ("geolocation" in navigator) {
+                watcher = navigator.geolocation.watchPosition(
+                    (position) => {
+                        const { latitude, longitude } = position.coords;
+                        sql.updateUserLocation(user.id, latitude, longitude);
+                    },
+                    (error) => console.error("Location tracking error:", error),
+                    { enableHighAccuracy: true, maximumAge: 30000, timeout: 27000 }
+                );
+            }
+
+            return () => {
+                if (watcher !== null) navigator.geolocation.clearWatch(watcher);
+            };
         }
     }, [user]);
 
@@ -44,81 +70,61 @@ const DeliveryBoyDashboard = () => {
             setShop(s || null);
 
             const assignedOrders = await sql.getAssignedOrders(user.id);
+            setAllAssignedOrders(assignedOrders);
 
-            // 1-hour shift logic: 
-            // Shop 9-7 means Delivery 10-8. 
-            // Only show orders placed at least 1 hour before the current hour slot.
+            // Filter for current delivery slot
             const now = new Date();
             const currentHour = now.getHours();
-            const currentMinute = now.getMinutes();
-            const currentTimeStr = `${currentHour.toString().padStart(2, '0')}:${currentMinute.toString().padStart(2, '0')}`;
 
             const activeOrders = assignedOrders.filter(o => {
-                if (o.status === "completed") return false;
+                if (o.status === "completed" || o.status === "cancelled") return false;
 
-                // If shop has hours, check delivery shift
-                if (s?.openingTime && s?.closingTime) {
-                    const [shopH] = s.openingTime.split(":").map(Number);
-                    const [shopCloseH] = s.closingTime.split(":").map(Number);
-
-                    const deliveryStartH = shopH + 1;
-                    const deliveryEndH = shopCloseH + 1;
-
-                    // Outside of delivery shift
-                    if (currentHour < deliveryStartH || currentHour >= deliveryEndH) return false;
-
-                    // Within shift, only show orders placed before the start of the current hour
-                    const orderDate = new Date(o.date);
-                    const orderH = orderDate.getHours();
-
-                    // Specific requirement: 9-10am orders delivered at 10am+
-                    // So if it's 10:30, orderH must be < 10
-                    if (orderH >= currentHour) return false;
-                }
-
-                return true;
+                // Deliver orders from Hour H in Hour H+1
+                const orderDate = new Date(o.date);
+                const orderHour = orderDate.getHours();
+                
+                // If it's 10:xx, we deliver 9:xx orders. 
+                // orderHour (9) + 1 = currentHour (10)
+                return (orderHour + 1) === currentHour;
             });
 
-            setOrders(activeOrders);
+            // Lunch Shift Logic: 
+            // If shop is at lunch (e.g., 1-2 PM), delivery is at lunch (2-3 PM)
+            let lunchActive = false;
+            if (s?.lunchTime) {
+                const parts = s.lunchTime.split("-").map(p => p.trim());
+                if (parts.length >= 2) {
+                    const shopLunchStart = parseInt(parts[0].split(":")[0]);
+                    const shopLunchEnd = parseInt(parts[1].split(":")[0]);
+                    const deliveryLunchStart = shopLunchStart + 1;
+                    const deliveryLunchEnd = shopLunchEnd + 1;
+                    
+                    if (currentHour >= deliveryLunchStart && currentHour < deliveryLunchEnd) {
+                        lunchActive = true;
+                    }
+                }
+            }
 
-            if (s && activeOrders.length > 0) {
-                calculateRoute(s, activeOrders);
+            setOrders(lunchActive ? [] : activeOrders);
+            setIsLunch(lunchActive);
+
+            if (s && activeOrders.length > 0 && !lunchActive) {
+                const optimized = optimizeRoute(activeOrders, { lat: s.lat, lng: s.lng });
+                setRoute(optimized);
+            } else {
+                setRoute([]);
             }
         }
         setLoading(false);
     };
 
-    const calculateRoute = (shopInfo: Shop, pendingOrders: Order[]) => {
-        let currentLat = shopInfo.lat;
-        let currentLng = shopInfo.lng;
-        const remaining = [...pendingOrders];
-        const optimizedRoute: Order[] = [];
+    const totalEarnings = allAssignedOrders
+        .filter(o => o.status === "completed")
+        .reduce((sum, o) => sum + (o.deliveryCharge || 0) + (o.tipAmount || 0) + (o.petrolAllowance || 0), 0);
 
-        while (remaining.length > 0) {
-            let nearestIdx = 0;
-            let minDistance = Infinity;
-
-            for (let i = 0; i < remaining.length; i++) {
-                const dist = getDistance(
-                    currentLat,
-                    currentLng,
-                    remaining[i].lat || 0,
-                    remaining[i].lng || 0
-                );
-                if (dist < minDistance) {
-                    minDistance = dist;
-                    nearestIdx = i;
-                }
-            }
-
-            const nextOrder = remaining.splice(nearestIdx, 1)[0];
-            optimizedRoute.push(nextOrder);
-            currentLat = nextOrder.lat || 0;
-            currentLng = nextOrder.lng || 0;
-        }
-
-        setRoute(optimizedRoute);
-    };
+    const historyOrders = allAssignedOrders
+        .filter(o => o.status === "completed" || o.status === "cancelled")
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
     useEffect(() => {
         if (isReady && mapRef.current && !mapInstance.current && shop && route.length > 0) {
@@ -169,8 +175,29 @@ const DeliveryBoyDashboard = () => {
             }
         });
 
-        // Route line
-        L.polyline(points, { color: "hsl(220, 55%, 18%)", weight: 3, dashArray: "8,8" }).addTo(map);
+        // 149. Fetch and draw road-based route
+        const fetchRoute = async (points: [number, number][]) => {
+            if (points.length < 2) return;
+            const query = points.map(p => `${p[1]},${p[0]}`).join(";");
+            try {
+                const response = await fetch(`https://router.project-osrm.org/route/v1/driving/${query}?overview=full&geometries=geojson`);
+                const data = await response.json();
+                if (data.routes && data.routes[0]) {
+                    const coords = data.routes[0].geometry.coordinates.map((c: any) => [c[1], c[0]]);
+                    L.polyline(coords, { color: "hsl(220, 95%, 45%)", weight: 6, opacity: 0.8, lineJoin: "round" }).addTo(map);
+                    // Add a dashed core for premium feel
+                    L.polyline(coords, { color: "white", weight: 2, dashArray: "5, 10", opacity: 0.5 }).addTo(map);
+                } else {
+                    // Fallback to straight lines if API fails
+                    L.polyline(points, { color: "hsl(220, 55%, 18%)", weight: 3, dashArray: "8,8" }).addTo(map);
+                }
+            } catch (err) {
+                console.error("Routing error:", err);
+                L.polyline(points, { color: "hsl(220, 55%, 18%)", weight: 3, dashArray: "8,8" }).addTo(map);
+            }
+        };
+
+        fetchRoute(points);
 
         // Fit bounds
         if (points.length > 1) {
@@ -210,7 +237,144 @@ const DeliveryBoyDashboard = () => {
                 )}
             </motion.div>
 
-            {route.length === 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Card className="bg-indian-green/5 border-indian-green/20 relative overflow-hidden group">
+                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform">
+                        <IndianRupee className="w-12 h-12" />
+                    </div>
+                    <CardContent className="p-6">
+                        <p className="text-xs font-bold text-indian-green uppercase tracking-wider mb-1">Total Earnings</p>
+                        <p className="text-3xl font-black text-foreground">₹{totalEarnings.toFixed(2)}</p>
+                        <p className="text-[10px] text-muted-foreground mt-2 flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3 text-indian-green" /> {allAssignedOrders.filter(o => o.status === "completed").length} Deliveries Completed
+                        </p>
+                    </CardContent>
+                </Card>
+
+                <Card className={`relative overflow-hidden group border-primary/20 ${timeLeft && timeLeft.m < 10 ? 'bg-amber-50 animate-pulse border-amber-300' : 'bg-primary/5'}`}>
+                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform">
+                        <Clock className="w-12 h-12" />
+                    </div>
+                    <CardContent className="p-6">
+                        <p className="text-xs font-bold text-primary uppercase tracking-wider mb-1">Current Batch Slot</p>
+                        <p className="text-3xl font-black text-foreground">
+                            {new Date().getHours()}:00 - {new Date().getHours() + 1}:00
+                        </p>
+                        {timeLeft && (
+                            <p className={`text-[10px] font-bold mt-2 flex items-center gap-1 ${timeLeft.m < 10 ? 'text-amber-600' : 'text-muted-foreground'}`}>
+                                {timeLeft.m < 10 && <AlertTriangle className="w-3 h-3" />}
+                                Next Batch In: {timeLeft.m}:{timeLeft.s.toString().padStart(2, '0')}
+                            </p>
+                        )}
+                    </CardContent>
+                </Card>
+
+                <Card className="bg-accent/5 border-accent/20 cursor-pointer hover:bg-accent/10 transition-colors" onClick={() => setView(view === "active" ? "history" : "active")}>
+                    <CardContent className="p-6 flex flex-col justify-center h-full">
+                        <div className="flex items-center justify-between mb-2">
+                             <p className="text-xs font-bold text-accent uppercase tracking-wider">Quick Actions</p>
+                             {view === "active" ? <ClipboardList className="w-4 h-4 text-accent" /> : <Truck className="w-4 h-4 text-accent" />}
+                        </div>
+                        <p className="text-lg font-bold">
+                            {view === "active" ? "View History" : "Back to Active"}
+                        </p>
+                    </CardContent>
+                </Card>
+            </div>
+
+            {timeLeft && timeLeft.m < 5 && (
+                 <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="p-4 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-sm flex items-center gap-3 shadow-lg">
+                    <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+                        <AlertTriangle className="w-5 h-5 text-amber-600 animate-bounce" />
+                    </div>
+                    <div>
+                        <p className="font-bold">Batch Ending Soon!</p>
+                        <p className="text-xs opacity-80">Finish current tasks and return to the shop for the <b>{new Date().getHours()+1}:00</b> batch.</p>
+                    </div>
+                 </motion.div>
+            )}
+
+            <div className="flex gap-2 p-1 bg-muted rounded-lg w-fit">
+                <Button 
+                    variant={view === "active" ? "default" : "ghost"} 
+                    className={view === "active" ? "gradient-saffron text-accent-foreground" : ""}
+                    onClick={() => setView("active")}
+                >
+                    <Truck className="w-4 h-4 mr-2" /> Active Roadmap
+                </Button>
+                <Button 
+                    variant={view === "history" ? "default" : "ghost"} 
+                    className={view === "history" ? "gradient-saffron text-accent-foreground" : ""}
+                    onClick={() => setView("history")}
+                >
+                    <HistoryIcon className="w-4 h-4 mr-2" /> History & Earnings
+                </Button>
+            </div>
+
+            <AnimatePresence mode="wait">
+            {view === "history" ? (
+                <motion.div key="history" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Trip History</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                             <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="border-b text-muted-foreground uppercase text-[10px]">
+                                             <th className="text-left py-3 font-black">Date & Order</th>
+                                             <th className="text-left py-3 font-black">Destination</th>
+                                             <th className="text-center py-3 font-black">Status</th>
+                                             <th className="text-right py-3 font-black">Earnings</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y">
+                                        {historyOrders.map(o => (
+                                            <tr key={o.id} className="hover:bg-muted/30 transition-colors">
+                                                <td className="py-4">
+                                                    <p className="font-bold">#{o.id.slice(0, 8)}</p>
+                                                    <p className="text-[10px] text-muted-foreground">{new Date(o.date).toLocaleDateString()} {new Date(o.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                                                </td>
+                                                <td className="py-4 max-w-[200px]">
+                                                    <p className="text-[10px] line-clamp-1">{o.address}</p>
+                                                </td>
+                                                <td className="py-4 text-center">
+                                                    <Badge variant={o.status === "completed" ? "secondary" : "destructive"} className={o.status === "completed" ? "bg-indian-green/20 text-indian-green border-none" : ""}>
+                                                        {o.status.toUpperCase()}
+                                                    </Badge>
+                                                </td>
+                                                <td className="py-4 text-right">
+                                                    <div className="flex flex-col items-end">
+                                                        <p className="font-black text-indian-green">₹{((o.deliveryCharge || 0) + (o.tipAmount || 0) + (o.petrolAllowance || 0)).toFixed(2)}</p>
+                                                        <p className="text-[8px] text-muted-foreground">C:₹{o.deliveryCharge} + P:₹{o.petrolAllowance} + T:₹{o.tipAmount}</p>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                        {historyOrders.length === 0 && (
+                                            <tr>
+                                                <td colSpan={4} className="py-12 text-center text-muted-foreground">No history records found.</td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                             </div>
+                        </CardContent>
+                    </Card>
+                </motion.div>
+            ) : isLunch ? (
+                <Card className="py-16 text-center bg-amber-50/50 border-amber-200">
+                    <CardContent>
+                        <Clock className="w-16 h-16 mx-auto mb-4 text-amber-500 animate-pulse" />
+                        <h3 className="text-xl font-bold text-amber-900 font-display">Lunch Break</h3>
+                        <p className="text-sm text-amber-700 max-w-xs mx-auto mt-2 font-medium">
+                            Your delivery shift is currently on lunch break (1 hour offset from shop lunch).
+                            Deliveries will resume in the next hour slot.
+                        </p>
+                    </CardContent>
+                </Card>
+            ) : route.length === 0 ? (
                 <Card className="py-16 text-center border-dashed">
                     <CardContent>
                         <Truck className="w-16 h-16 mx-auto mb-4 opacity-20 text-primary" />
@@ -254,8 +418,8 @@ const DeliveryBoyDashboard = () => {
                             <div className="space-y-4">
                                 {route.map((order, index) => {
                                     const distance = index === 0
-                                        ? getDistance(shop?.lat || 0, shop?.lng || 0, order.lat || 0, order.lng || 0)
-                                        : getDistance(route[index - 1].lat || 0, route[index - 1].lng || 0, order.lat || 0, order.lng || 0);
+                                        ? calculateDistance(shop?.lat || 0, shop?.lng || 0, order.lat || 0, order.lng || 0)
+                                        : calculateDistance(route[index - 1].lat || 0, route[index - 1].lng || 0, order.lat || 0, order.lng || 0);
 
                                     const isNext = index === 0 || route[index - 1].deliveryStatus === 'delivered';
                                     const isCurrent = order.deliveryStatus === 'out_for_delivery';
@@ -351,6 +515,7 @@ const DeliveryBoyDashboard = () => {
                     </div>
                 </div>
             )}
+            </AnimatePresence>
         </div>
     );
 };

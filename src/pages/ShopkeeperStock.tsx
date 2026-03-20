@@ -10,6 +10,7 @@ import {
     DialogContent,
     DialogHeader,
     DialogTitle,
+    DialogDescription,
     DialogTrigger,
     DialogFooter,
 } from "@/components/ui/dialog";
@@ -20,8 +21,8 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { sql, type Stock, type Shop } from "@/lib/db";
-import { Package, Plus, Search, AlertCircle, Save, Trash2, Wheat, Droplets, Flame, Sparkles, Clock, Power } from "lucide-react";
+import { sql, type Stock, type Shop, type StockDelivery, type StockRequest } from "@/lib/db";
+import { Package, Plus, Search, AlertCircle, Save, Trash2, Wheat, Droplets, Flame, Clock, Power, Inbox, CheckCircle, ClipboardList, Send } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -41,8 +42,11 @@ const ShopkeeperStock = () => {
     const { toast } = useToast();
     const [shop, setShop] = useState<Shop | null>(null);
     const [stocks, setStocks] = useState<Stock[]>([]);
+    const [pendingDeliveries, setPendingDeliveries] = useState<StockDelivery[]>([]);
+    const [myRequests, setMyRequests] = useState<StockRequest[]>([]);
     const [loading, setLoading] = useState(true);
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+    const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const [form, setForm] = useState({
         itemName: "Rice",
@@ -55,6 +59,11 @@ const ShopkeeperStock = () => {
     const [quotaItems, setQuotaItems] = useState<string[]>([]);
     const [isCustomItem, setIsCustomItem] = useState(false);
     const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+    const [requestForm, setRequestForm] = useState({
+        itemName: "Rice",
+        quantity: "50",
+        unit: "kg"
+    });
 
     const fetchData = async () => {
         if (!user?.id) return;
@@ -64,6 +73,12 @@ const ShopkeeperStock = () => {
             setShop(myShop);
             const inventory = await sql.getShopStock(myShop.id);
             setStocks(inventory);
+            
+            const pending = await sql.getPendingStockDeliveries(myShop.id);
+            setPendingDeliveries(pending);
+
+            const requests = await sql.getShopStockRequests(myShop.id);
+            setMyRequests(requests.sort((a, b) => b.date.localeCompare(a.date)));
 
             // Fetch quota items
             const allQuotas = await sql.getAllQuotas();
@@ -112,6 +127,18 @@ const ShopkeeperStock = () => {
 
             await sql.updateOrInsertStock(data);
 
+            // Notify nearby beneficiaries
+            if (shop.lat && shop.lng) {
+                await sql.notifyNearbyUsers(
+                    shop.lat,
+                    shop.lng,
+                    10,
+                    "New Stock Alert",
+                    `new stock is added in this ${shop.name} shop: ${finalItemName}`,
+                    'stock'
+                );
+            }
+
             toast({ title: "Stock Updated", description: `${finalItemName} inventory updated.` });
             setIsAddModalOpen(false);
             setForm(p => ({ ...p, quantity: "", limitPerCard: "", price: "", customItemName: "" }));
@@ -131,6 +158,92 @@ const ShopkeeperStock = () => {
             toast({ title: "Status Updated", description: "Shop operational status updated successfully." });
         } catch (error: any) {
             toast({ title: "Error", description: error.message, variant: "destructive" });
+        } finally {
+            setIsUpdatingStatus(false);
+        }
+    };
+
+    const handleAcceptDelivery = async (delivery: StockDelivery) => {
+        if (!shop) return;
+        setIsUpdatingStatus(true);
+        try {
+            await sql.acceptStockDelivery(delivery.id, shop.id, delivery.items);
+            
+            if (shop.lat && shop.lng) {
+                const itemsList = (delivery.items as any[]).map(i => i.itemName).join(", ");
+            await sql.notifyNearbyUsers(
+                shop.lat, 
+                shop.lng, 
+                10, 
+                "Stock Reached! 🚛", 
+                `Great news! New stock of ${itemsList} has just arrived at ${shop.name}. Visit soon to get your quota.`,
+                'stock'
+            );
+            }
+
+            // Notify Admin(s)
+            const allUsers = await sql.getAllUsers();
+            const admins = allUsers.filter(u => u.role === "admin");
+            for (const admin of admins) {
+                await sql.createNotification({
+                    id: crypto.randomUUID(),
+                    userId: admin.id,
+                    title: "Stock Received",
+                    message: `Stock has successfully reached ${shop.name}.`,
+                    date: new Date().toISOString(),
+                    read: false,
+                    type: "system"
+                });
+            }
+            
+            toast({ title: "Stock Accepted", description: "Inventory has been updated and beneficiaries/admin notified successfully." });
+            fetchData();
+        } catch (error: any) {
+             toast({ title: "Acceptance Failed", description: error.message, variant: "destructive" });
+        } finally {
+            setIsUpdatingStatus(false);
+        }
+    };
+
+    const handleRequestStock = async () => {
+        if (!shop || !requestForm.quantity) return;
+        setIsUpdatingStatus(true);
+        try {
+            const requestId = crypto.randomUUID();
+            const request: StockRequest = {
+                id: requestId,
+                shopId: shop.id,
+                shopName: shop.name,
+                items: [{
+                    itemName: requestForm.itemName,
+                    quantity: parseFloat(requestForm.quantity),
+                    unit: requestForm.unit
+                }],
+                status: "pending",
+                date: new Date().toISOString()
+            };
+
+            await sql.createStockRequest(request);
+
+            // Notify Admins
+            const admins = (await sql.getAllUsers()).filter(u => u.role === "admin");
+            for (const admin of admins) {
+                await sql.createNotification({
+                    id: crypto.randomUUID(),
+                    userId: admin.id,
+                    title: "New Stock Request",
+                    message: `${shop.name} has requested ${requestForm.quantity} ${requestForm.unit} of ${requestForm.itemName}.`,
+                    date: new Date().toISOString(),
+                    read: false,
+                    type: "stock"
+                });
+            }
+
+            toast({ title: "Request Sent", description: "Your stock request has been sent to the admin for review." });
+            setIsRequestModalOpen(false);
+            fetchData();
+        } catch (error: any) {
+            toast({ title: "Request Failed", description: error.message, variant: "destructive" });
         } finally {
             setIsUpdatingStatus(false);
         }
@@ -165,10 +278,55 @@ const ShopkeeperStock = () => {
                         </Badge>
                     </div>
                 </div>
-                <Button onClick={() => setIsAddModalOpen(true)} className="gradient-header text-primary-foreground font-semibold">
-                    <Plus className="w-4 h-4 mr-2" /> Add/Update Item
-                </Button>
+                <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => setIsRequestModalOpen(true)} className="border-primary text-primary hover:bg-primary/10">
+                        <ClipboardList className="w-4 h-4 mr-2" /> Request Stock
+                    </Button>
+                    {shop.type !== "ration" && (
+                        <Button onClick={() => setIsAddModalOpen(true)} className="gradient-header text-primary-foreground font-semibold">
+                            <Plus className="w-4 h-4 mr-2" /> Add/Update Item
+                        </Button>
+                    )}
+                </div>
             </motion.div>
+
+            {pendingDeliveries.length > 0 && (
+                <div className="space-y-4">
+                    {pendingDeliveries.map(delivery => (
+                        <Card key={delivery.id} className="border-blue-500 bg-blue-50/50 shadow-md">
+                            <CardHeader className="pb-2">
+                                <CardTitle className="text-blue-800 flex items-center gap-2 text-lg">
+                                    <Inbox className="w-5 h-5" /> Incoming Stock Delivery from Admin
+                                </CardTitle>
+                                <CardDescription className="text-blue-600/80">
+                                    Assigned on {new Date(delivery.date).toLocaleDateString()}
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                    <div className="flex flex-wrap gap-2">
+                                        {delivery.items.map((item, i) => (
+                                            <Badge key={i} variant="outline" className="bg-white text-blue-800 border-blue-200">
+                                                {item.quantity} {item.unit} {item.itemName}
+                                            </Badge>
+                                        ))}
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                        <p className="text-sm font-medium text-blue-800">Did the stock reach you?</p>
+                                        <Button 
+                                            onClick={() => handleAcceptDelivery(delivery)}
+                                            disabled={isUpdatingStatus}
+                                            className="bg-blue-600 hover:bg-blue-700 text-white"
+                                        >
+                                            <CheckCircle className="w-4 h-4 mr-2" /> Yes, Confirm Receipt
+                                        </Button>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    ))}
+                </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {/* Inventory Table */}
@@ -276,6 +434,16 @@ const ShopkeeperStock = () => {
                                 </Button>
                             </div>
 
+                            <div className="flex items-center gap-3 p-2 rounded-lg bg-primary/5 border border-primary/10">
+                                <div className={`p-2 rounded-full ${sql.isShopOpen(shop) ? "bg-indian-green/20 text-indian-green" : "bg-destructive/20 text-destructive"}`}>
+                                    <Power className="w-4 h-4" />
+                                </div>
+                                    <div>
+                                        <p className="text-xs font-bold">{sql.isShopOpen(shop) ? "Shop is OPEN" : "Shop is CLOSED"}</p>
+                                        <p className="text-[10px] text-muted-foreground">Manual Control Only</p>
+                                    </div>
+                            </div>
+
                             <div className="space-y-3">
                                 <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Working Hours</p>
                                 <div className="grid grid-cols-2 gap-2">
@@ -298,40 +466,23 @@ const ShopkeeperStock = () => {
                                         />
                                     </div>
                                 </div>
-                                <p className="text-[9px] text-muted-foreground italic">
-                                    Beneficiaries can only place orders during these hours unless manually closed.
+                                <div className="space-y-1 mt-2">
+                                    <Label className="text-[10px]">Lunch Break</Label>
+                                    <Input
+                                        placeholder="e.g. 13:00 - 14:00"
+                                        className="h-8 text-xs"
+                                        value={shop.lunchTime || ""}
+                                        onChange={(e) => handleUpdateShopStatus({ lunchTime: e.target.value })}
+                                    />
+                                </div>
+                                <p className="text-[9px] text-muted-foreground italic mt-2">
+                                    Display only. Opening and closing is managed manually by you.
                                 </p>
                             </div>
                         </CardContent>
                     </Card>
 
-                    <Card className="shadow-card border-primary/20 bg-primary/5">
-                        <CardHeader className="pb-2">
-                            <CardTitle className="text-sm flex items-center gap-2">
-                                <Sparkles className="w-4 h-4 text-primary" />
-                                Store Info
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            <div className="space-y-1">
-                                <p className="text-xs font-semibold">Shop Type: {shop.type === "ration" ? "Ration Store" : "Extra Store"}</p>
-                                <p className="text-[10px] text-muted-foreground">
-                                    {shop.type === "ration"
-                                        ? "Restricted to government approved quota items only."
-                                        : "Can stock all listed commodities and extra items."}
-                                </p>
-                            </div>
-                            <div className="space-y-2">
-                                <div className="flex justify-between text-xs">
-                                    <span>Inventory Utilization</span>
-                                    <span>{Math.min(stocks.length * 15, 100)}%</span>
-                                </div>
-                                <div className="h-2 bg-muted rounded-full overflow-hidden">
-                                    <div className="h-full bg-primary" style={{ width: `${Math.min(stocks.length * 15, 100)}%` }} />
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
+
 
                     <Card className="shadow-card">
                         <CardHeader className="pb-2">
@@ -354,6 +505,39 @@ const ShopkeeperStock = () => {
                             )}
                         </CardContent>
                     </Card>
+
+                    {myRequests.length > 0 && (
+                        <Card className="shadow-card overflow-hidden">
+                            <CardHeader className="bg-secondary/10 pb-2">
+                                <CardTitle className="text-sm flex items-center gap-2">
+                                    <ClipboardList className="w-4 h-4 text-primary" />
+                                    My Recent Requests
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="p-0">
+                                <Table>
+                                    <TableBody>
+                                        {myRequests.slice(0, 5).map((req) => (
+                                            <TableRow key={req.id} className="text-[10px]">
+                                                <TableCell className="py-2">
+                                                    {req.items.map(i => `${i.itemName} (${i.quantity}${i.unit})`).join(", ")}
+                                                </TableCell>
+                                                <TableCell className="py-2 text-right">
+                                                    <Badge className="text-[8px] px-1 h-4" variant={
+                                                        req.status === "approved" ? "default" :
+                                                        req.status === "rejected" ? "destructive" :
+                                                        req.status === "modified" ? "secondary" : "outline"
+                                                    }>
+                                                        {req.status.toUpperCase()}
+                                                    </Badge>
+                                                </TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            </CardContent>
+                        </Card>
+                    )}
                 </div>
             </div>
 
@@ -463,6 +647,61 @@ const ShopkeeperStock = () => {
                         <Button variant="outline" onClick={() => setIsAddModalOpen(false)}>Cancel</Button>
                         <Button className="gradient-header text-primary-foreground" onClick={handleAddStock}>
                             <Save className="w-4 h-4 mr-2" /> Save Changes
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={isRequestModalOpen} onOpenChange={setIsRequestModalOpen}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Request Stock from Admin</DialogTitle>
+                        <DialogDescription>
+                            Submit a request for items you need based on current demand.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                            <Label>Item Name</Label>
+                            <Select value={requestForm.itemName} onValueChange={(v) => setRequestForm(p => ({ ...p, itemName: v }))}>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="Rice">Rice</SelectItem>
+                                    <SelectItem value="Wheat">Wheat</SelectItem>
+                                    <SelectItem value="Sugar">Sugar</SelectItem>
+                                    <SelectItem value="Kerosene">Kerosene</SelectItem>
+                                    <SelectItem value="Mustard Oil">Mustard Oil</SelectItem>
+                                    <SelectItem value="Salt">Salt</SelectItem>
+                                    <SelectItem value="Lentils">Lentils</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <Label>Quantity</Label>
+                                <Input
+                                    type="number"
+                                    value={requestForm.quantity}
+                                    onChange={(e) => setRequestForm(p => ({ ...p, quantity: e.target.value }))}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Unit</Label>
+                                <Select value={requestForm.unit} onValueChange={(v) => setRequestForm(p => ({ ...p, unit: v }))}>
+                                    <SelectTrigger><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="kg">kg</SelectItem>
+                                        <SelectItem value="L">L</SelectItem>
+                                        <SelectItem value="packet">packet</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsRequestModalOpen(false)}>Cancel</Button>
+                        <Button className="gradient-header text-primary-foreground" onClick={handleRequestStock} disabled={isUpdatingStatus}>
+                            <Send className="w-4 h-4 mr-2" /> Submit Request
                         </Button>
                     </DialogFooter>
                 </DialogContent>

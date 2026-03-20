@@ -23,7 +23,7 @@ const QuotaPage = () => {
   useEffect(() => {
     if (user?.id) {
       Promise.all([
-        sql.getPurchases(user.id),
+        sql.getCurrentMonthPurchases(user.id),
         sql.getAllQuotas()
       ]).then(([purchasesData, quotasData]) => {
         setPurchases(purchasesData);

@@ -20,11 +20,14 @@ import {
   AlertCircle,
   Loader2,
   Users,
+  Truck,
+  Package,
+  Clock,
 } from "lucide-react";
 import { sql, db, calculateDistance, type Purchase, type Shop, type User } from "@/lib/db";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
 import { useToast } from "@/hooks/use-toast";
+import { useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -38,14 +41,7 @@ if (L.Icon.Default) {
   });
 }
 
-const MapEventsHandler = ({ setLoc }: { setLoc: any }) => {
-  useMapEvents({
-    click(e) {
-      setLoc((p: any) => ({ ...p, lat: e.latlng.lat, lng: e.latlng.lng }));
-    }
-  });
-  return null;
-};
+// Component removed as we now use direct Leaflet events
 
 interface CartItem {
   name: string;
@@ -97,37 +93,46 @@ const PurchasePage = () => {
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
   const [shop, setShop] = useState<Shop | null>(null);
+  const [tipAmount, setTipAmount] = useState(0);
   const [allQuotas, setAllQuotas] = useState<any[]>([]);
   const [availableBoys, setAvailableBoys] = useState<User[]>([]);
   const [paymentStatus, setPaymentStatus] = useState<"idle" | "simulating" | "success">("idle");
   const [deliveryCharge, setDeliveryCharge] = useState(10);
-  const [tipAmount, setTipAmount] = useState(0);
+  const [petrolAllowanceRate, setPetrolAllowanceRate] = useState(50);
+  const [isSlotFull, setIsSlotFull] = useState(false);
+  const [distance, setDistance] = useState(0);
 
   useEffect(() => {
     sql.getSystemSettings().then(s => {
       if (s?.deliveryCharge !== undefined) setDeliveryCharge(Number(s.deliveryCharge) || 0);
+      if (s?.petrolAllowance !== undefined) setPetrolAllowanceRate(Number(s.petrolAllowance) || 50);
     });
   }, []);
 
   const targetShopId = searchParams.get("shop") || user?.assignedShopId;
 
-  const isShopCurrentlyOpen = () => {
-    if (!shop) return true;
-    if (shop.isManualOpen === false) return false;
-
-    if (shop.openingTime && shop.closingTime) {
+  useEffect(() => {
+    if (targetShopId) {
       const now = new Date();
-      const currentH = now.getHours();
-      const currentM = now.getMinutes();
-      const currentTime = `${currentH.toString().padStart(2, '0')}:${currentM.toString().padStart(2, '0')}`;
-
-      return currentTime >= shop.openingTime && currentTime <= shop.closingTime;
+      const hour = now.getHours();
+      
+      Promise.all([
+        sql.getDeliveryBoysByShop(targetShopId),
+        sql.getOrdersCountInSlot(targetShopId, hour)
+      ]).then(([boys, count]) => {
+        const capacity = boys.length * 10;
+        setIsSlotFull(count >= capacity && capacity > 0);
+      });
     }
+  }, [targetShopId]);
 
-    return true;
-  };
+  useEffect(() => {
+    if (shop && deliveryLoc) {
+      setDistance(calculateDistance(shop.lat, shop.lng, deliveryLoc.lat, deliveryLoc.lng));
+    }
+  }, [shop, deliveryLoc]);
 
-  const isOpen = isShopCurrentlyOpen();
+  const isOpen = shop ? sql.isShopOpen(shop) : true;
 
   useEffect(() => {
     if (targetShopId) {
@@ -140,7 +145,7 @@ const PurchasePage = () => {
       const category = user.category || "PHH";
 
       Promise.all([
-        sql.getPurchases(user.id),
+        sql.getCurrentMonthPurchases(user.id),
         sql.getShopStock(shop.id),
         sql.getAllQuotas(),
         sql.getDeliveryBoysByShop(shop.id)
@@ -199,8 +204,61 @@ const PurchasePage = () => {
   };
 
   const [deliveryType, setDeliveryType] = useState<"pickup" | "delivery">("pickup");
+
+  const mapRef = useRef<HTMLDivElement>(null);
+  const mapInstance = useRef<any>(null);
+  const markerRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (checkoutStep !== "location" || deliveryType !== "delivery" || !mapRef.current) return;
+
+    let isMounted = true;
+    let map: any = null;
+
+    const initMap = async () => {
+      const L = await import("leaflet");
+      if (!isMounted || !mapRef.current) return;
+
+      if (mapInstance.current) {
+        mapInstance.current.remove();
+        mapInstance.current = null;
+      }
+
+      map = L.map(mapRef.current).setView([deliveryLoc.lat, deliveryLoc.lng], 13);
+      mapInstance.current = map;
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      }).addTo(map);
+
+      const marker = L.marker([deliveryLoc.lat, deliveryLoc.lng], { draggable: true }).addTo(map);
+      markerRef.current = marker;
+
+      marker.on('dragend', (e: any) => {
+        const { lat, lng } = e.target.getLatLng();
+        setDeliveryLoc(p => ({ ...p, lat, lng }));
+      });
+
+      map.on('click', (e: any) => {
+        const { lat, lng } = e.latlng;
+        setDeliveryLoc(p => ({ ...p, lat, lng }));
+        marker.setLatLng([lat, lng]);
+      });
+    };
+
+    initMap();
+
+    return () => {
+      isMounted = false;
+      if (mapInstance.current) {
+        mapInstance.current.remove();
+        mapInstance.current = null;
+      }
+    };
+  }, [checkoutStep, deliveryType]);
   const itemsTotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
-  const total = itemsTotal + (deliveryType === "delivery" ? deliveryCharge : 0) + tipAmount;
+  const petrolAllowance = deliveryType === "delivery" ? Math.round(distance * petrolAllowanceRate * 10) / 10 : 0;
+  const total = itemsTotal + (deliveryType === "delivery" ? (deliveryCharge + petrolAllowance) : 0) + tipAmount;
   const itemsInCart = cart.filter(m => m.qty > 0);
 
   const handleFinalOrder = async () => {
@@ -243,6 +301,7 @@ const PurchasePage = () => {
         lng: deliveryType === "delivery" ? deliveryLoc.lng : undefined,
         address: deliveryType === "delivery" ? deliveryLoc.address : undefined,
         deliveryCharge: deliveryType === "delivery" ? deliveryCharge : 0,
+        petrolAllowance: petrolAllowance,
         tipAmount: tipAmount,
         totalAmount: total
       });
@@ -252,6 +311,7 @@ const PurchasePage = () => {
           id: crypto.randomUUID(),
           userId: user?.id || "",
           shopId: targetShopId || "",
+          orderId: orderId,
           itemName: item.name,
           amount: item.qty,
           unit: item.unit,
@@ -322,12 +382,21 @@ const PurchasePage = () => {
                     <Badge variant={isOpen ? "secondary" : "destructive"} className={isOpen ? "bg-indian-green/20 text-indian-green border-indian-green/20" : ""}>
                       {isOpen ? "Shop Open" : "Shop Closed"}
                     </Badge>
-                    <p className="text-sm font-bold text-primary">{shop.name}</p>
+                    <div className="flex flex-col gap-1">
+                      <p className="text-sm font-bold text-foreground truncate">{shop.name}</p>
+                      <p className="text-xs text-muted-foreground truncate">{shop.address}</p>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        <Badge variant="outline" className="text-[8px] h-3.5 border-primary/20 bg-primary/5 text-primary">
+                          <Clock className="w-2 h-2 mr-1" /> {shop.openingTime || "09:00"} - {shop.closingTime || "17:00"}
+                        </Badge>
+                        {shop.lunchTime && (
+                          <Badge variant="outline" className="text-[8px] h-3.5 border-accent/20 bg-accent/5 text-accent">
+                            Lunch: {shop.lunchTime}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <p className="text-[10px] text-muted-foreground">{shop.address}</p>
-                  {shop.openingTime && (
-                    <p className="text-[9px] text-muted-foreground">Hours: {shop.openingTime} - {shop.closingTime}</p>
-                  )}
                   {user?.lat && user?.lng && (
                     <p className="text-[9px] font-bold text-indian-green flex items-center justify-end gap-1 mt-0.5">
                       <Navigation className="w-2 h-2" /> {Math.round(calculateDistance(user.lat, user.lng, shop.lat, shop.lng) * 100) / 100} km from home
@@ -397,10 +466,22 @@ const PurchasePage = () => {
                   variant={deliveryType === "delivery" ? "default" : "outline"}
                   className={`flex-1 ${deliveryType === "delivery" ? "gradient-saffron text-accent-foreground" : ""}`}
                   onClick={() => setDeliveryType("delivery")}
+                  disabled={isSlotFull}
                 >
-                  Home Delivery
+                  {isSlotFull ? (
+                    <span className="flex items-center gap-1.5">
+                      <Clock className="w-3 h-3" /> Shop Busy
+                    </span>
+                  ) : "Home Delivery"}
                 </Button>
               </div>
+
+              {isSlotFull && (
+                <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-[10px] flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-500" />
+                  <p><b>Capacity Limit Reached:</b> All delivery partners are currently busy. Home delivery will resume shortly. Please choose "Store Pickup" or try again later.</p>
+                </div>
+              )}
 
               {deliveryType === "delivery" && (
                 <>
@@ -424,36 +505,41 @@ const PurchasePage = () => {
                     </div>
                   )}
 
-                  <div className="h-[300px] rounded-lg overflow-hidden border mt-4 relative bg-muted">
-                    {(() => {
-                      const isValidLoc = typeof deliveryLoc.lat === 'number' && typeof deliveryLoc.lng === 'number' &&
-                        !isNaN(deliveryLoc.lat) && !isNaN(deliveryLoc.lng);
-
-                      if (!isValidLoc) {
-                        return (
-                          <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-muted text-muted-foreground text-center">
-                            <AlertCircle className="w-8 h-8 mb-2 opacity-50" />
-                            <p className="text-xs">Location coordinates are invalid. Please check your profile or select on map.</p>
-                          </div>
-                        );
-                      }
-
-                      return (
-                        <MapContainer
-                          center={[deliveryLoc.lat, deliveryLoc.lng]}
-                          zoom={13}
-                          style={{ height: "100%", width: "100%" }}
-                          scrollWheelZoom={false}
-                        >
-                          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                          <Marker position={[deliveryLoc.lat, deliveryLoc.lng]} />
-                          <MapEventsHandler setLoc={setDeliveryLoc} />
-                        </MapContainer>
-                      );
-                    })()}
+                  <div className="relative">
+                    <div ref={mapRef} className="h-[300px] rounded-lg overflow-hidden border mt-4 bg-muted z-0" />
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="absolute top-6 right-2 z-[400] shadow-md bg-white hover:bg-white/90 text-primary border border-primary/20"
+                      onClick={() => {
+                        if ("geolocation" in navigator) {
+                          navigator.geolocation.getCurrentPosition((pos) => {
+                            const { latitude, longitude } = pos.coords;
+                            setDeliveryLoc(p => ({ ...p, lat: latitude, lng: longitude }));
+                            if (markerRef.current) markerRef.current.setLatLng([latitude, longitude]);
+                            if (mapInstance.current) mapInstance.current.setView([latitude, longitude], 15);
+                          });
+                        }
+                      }}
+                    >
+                      <Navigation className="w-3 h-3 mr-1.5" /> My Location
+                    </Button>
                   </div>
-                  <p className="text-xs text-muted-foreground italic text-center">Click on the map to change delivery point if needed</p>
-                  <div className="space-y-2">
+                  <div className="flex justify-between items-center px-1">
+                    <p className="text-[10px] text-muted-foreground italic">Click on the map to change delivery point if needed</p>
+                    <Badge variant={distance > 10 ? "destructive" : "secondary"} className="text-[10px] py-0 px-2 h-5">
+                      {distance.toFixed(1)} km from shop
+                    </Badge>
+                  </div>
+
+                  {distance > 10 && (
+                    <div className="p-2 rounded bg-destructive/10 border border-destructive/20 text-destructive text-[10px] flex items-center gap-2">
+                       <AlertCircle className="w-3.5 h-3.5" />
+                       <p className="font-bold">Outside 10km delivery radius. Please choose a closer location or Store Pickup.</p>
+                    </div>
+                  )}
+
+                  <div className="space-y-2 mt-2">
                     <label className="text-sm font-bold">Address Details</label>
                     <textarea
                       className="w-full p-3 rounded-md border text-sm"
@@ -473,14 +559,16 @@ const PurchasePage = () => {
                 </div>
               )}
 
-              <div className="flex gap-4">
+              <div className="flex gap-4 pt-2">
                 <Button variant="ghost" onClick={() => setCheckoutStep("cart")} className="flex-1">Back</Button>
                 <Button
                   onClick={() => setCheckoutStep("payment")}
-                  disabled={deliveryType === "delivery" && (!availableBoys || availableBoys.length === 0)}
+                  disabled={
+                    (deliveryType === "delivery" && ((!availableBoys || availableBoys.length === 0) || distance > 10 || isSlotFull))
+                  }
                   className="flex-1 gradient-saffron text-accent-foreground font-bold"
                 >
-                  Go to Payment
+                  Confirm & Pay
                 </Button>
               </div>
             </Card>
@@ -499,7 +587,7 @@ const PurchasePage = () => {
                 <p className="text-4xl font-black text-foreground">₹{total.toFixed(1)}</p>
                 {deliveryType === "delivery" && (
                   <p className="text-[10px] text-muted-foreground mt-1 text-center">
-                    Items: ₹{itemsTotal.toFixed(1)} + Delivery: ₹{deliveryCharge} {tipAmount > 0 && `+ Tip: ₹${tipAmount}`}
+                    Items: ₹{itemsTotal.toFixed(1)} + Delivery: ₹{deliveryCharge} + Petrol: ₹{petrolAllowance.toFixed(1)} {tipAmount > 0 && `+ Tip: ₹${tipAmount}`}
                   </p>
                 )}
               </div>
