@@ -21,8 +21,8 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { sql, type Stock, type Shop, type StockDelivery, type StockRequest } from "@/lib/db";
-import { Package, Plus, Search, AlertCircle, Save, Trash2, Wheat, Droplets, Flame, Clock, Power, Inbox, CheckCircle, ClipboardList, Send } from "lucide-react";
+import { sql, type Stock, type Shop, type StockDelivery, type StockRequest, type Quota } from "@/lib/db";
+import { Package, Plus, Search, AlertCircle, Save, Trash2, Wheat, Droplets, Flame, Clock, Power, Inbox, CheckCircle, ClipboardList, Send, Milk } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -36,6 +36,15 @@ const ITEMS = [
     { name: "Salt", unit: "kg", icon: Droplets },
     { name: "Lentils", unit: "kg", icon: Wheat },
 ];
+
+const getItemIcon = (name: string) => {
+    const n = name.toLowerCase();
+    if (n.includes("rice") || n.includes("wheat") || n.includes("lentils")) return Wheat;
+    if (n.includes("sugar") || n.includes("oil") || n.includes("salt")) return Droplets;
+    if (n.includes("kerosene") || n.includes("fuel")) return Flame;
+    if (n.includes("milk")) return Milk;
+    return Package;
+};
 
 const ShopkeeperStock = () => {
     const { user } = useAuth();
@@ -56,7 +65,7 @@ const ShopkeeperStock = () => {
         price: "",
         unit: "kg"
     });
-    const [quotaItems, setQuotaItems] = useState<string[]>([]);
+    const [quotas, setQuotas] = useState<Quota[]>([]);
     const [isCustomItem, setIsCustomItem] = useState(false);
     const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
     const [requestForm, setRequestForm] = useState({
@@ -82,16 +91,28 @@ const ShopkeeperStock = () => {
 
             // Fetch quota items
             const allQuotas = await sql.getAllQuotas();
-            const uniqueItems = Array.from(new Set(allQuotas.map((q: any) => q.itemName))) as string[];
-            setQuotaItems(uniqueItems);
+            setQuotas(allQuotas);
 
             // Set default item based on available items
-            const availableItems = myShop.type === "ration"
-                ? ITEMS.filter(i => uniqueItems.includes(i.name))
+            const dynamicAvailableItems = myShop.type === "ration"
+                ? Array.from(new Set(allQuotas.map(q => q.itemName as string))).map(name => {
+                    const quota = allQuotas.find(q => q.itemName === name);
+                    const meta = ITEMS.find(i => i.name === name);
+                    return {
+                        name,
+                        unit: (meta?.unit || quota?.unit || "kg") as string,
+                        icon: meta?.icon || getItemIcon(name)
+                    };
+                })
                 : ITEMS;
 
-            if (availableItems.length > 0) {
-                setForm(p => ({ ...p, itemName: availableItems[0].name }));
+            if (dynamicAvailableItems.length > 0) {
+                setForm(p => ({ ...p, itemName: dynamicAvailableItems[0].name as string }));
+                setRequestForm(p => ({ 
+                    ...p, 
+                    itemName: dynamicAvailableItems[0].name as string,
+                    unit: dynamicAvailableItems[0].unit as string
+                }));
             }
         }
         setLoading(false);
@@ -260,7 +281,16 @@ const ShopkeeperStock = () => {
     );
 
     const availableItems = shop?.type === "ration"
-        ? ITEMS.filter(i => quotaItems.includes(i.name))
+        ? Array.from(new Set(quotas.map(q => q.itemName))).map(name => {
+            const quota = quotas.find(q => q.itemName === name);
+            const meta = ITEMS.find(i => i.name === name);
+            const itemName = name as string;
+            return {
+                name: itemName,
+                unit: (meta?.unit || quota?.unit || "kg") as string,
+                icon: meta?.icon || getItemIcon(itemName)
+            };
+        })
         : ITEMS;
 
     if (loading) return <div className="p-8 text-center">Loading inventory...</div>;
@@ -367,10 +397,9 @@ const ShopkeeperStock = () => {
                                         </TableCell>
                                     </TableRow>
                                 ) : (
-                                    filteredStocks.map((stock) => {
-                                        const meta = ITEMS.find(i => i.name === stock.itemName);
-                                        const Icon = meta?.icon || Package;
-                                        return (
+                                     filteredStocks.map((stock) => {
+                                         const Icon = getItemIcon(stock.itemName);
+                                         return (
                                             <TableRow key={stock.id} className="group">
                                                 <TableCell className="pl-6">
                                                     <div className="flex items-center gap-3">
@@ -666,13 +695,11 @@ const ShopkeeperStock = () => {
                             <Select value={requestForm.itemName} onValueChange={(v) => setRequestForm(p => ({ ...p, itemName: v }))}>
                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="Rice">Rice</SelectItem>
-                                    <SelectItem value="Wheat">Wheat</SelectItem>
-                                    <SelectItem value="Sugar">Sugar</SelectItem>
-                                    <SelectItem value="Kerosene">Kerosene</SelectItem>
-                                    <SelectItem value="Mustard Oil">Mustard Oil</SelectItem>
-                                    <SelectItem value="Salt">Salt</SelectItem>
-                                    <SelectItem value="Lentils">Lentils</SelectItem>
+                                     {availableItems.map(item => (
+                                         <SelectItem key={item.name} value={item.name}>
+                                             {item.name}
+                                         </SelectItem>
+                                     ))}
                                 </SelectContent>
                             </Select>
                         </div>

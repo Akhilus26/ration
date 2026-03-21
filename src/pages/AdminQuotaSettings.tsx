@@ -12,7 +12,7 @@ import {
     DialogFooter,
 } from "@/components/ui/dialog";
 import { motion } from "framer-motion";
-import { Wheat, Info, Save, RotateCcw, Settings2 } from "lucide-react";
+import { Wheat, Info, Save, RotateCcw, Settings2, Plus, Trash2, Droplets, Flame, Milk } from "lucide-react";
 import { sql, type Quota } from "@/lib/db";
 import { useToast } from "@/hooks/use-toast";
 
@@ -29,7 +29,17 @@ const AdminQuotaSettings = () => {
         setLoading(true);
         const allQuotas = await sql.getAllQuotas();
         setQuotas(allQuotas);
+        // Sync these with the ITEMS list in ShopkeeperStock.tsx if needed
         setLoading(false);
+    };
+
+    const getItemIcon = (name: string) => {
+        const n = name.toLowerCase();
+        if (n.includes("rice") || n.includes("wheat") || n.includes("lentils")) return Wheat;
+        if (n.includes("sugar") || n.includes("oil") || n.includes("salt")) return Droplets;
+        if (n.includes("kerosene") || n.includes("fuel")) return Flame;
+        if (n.includes("milk")) return Milk;
+        return Info;
     };
 
     useEffect(() => {
@@ -49,7 +59,23 @@ const AdminQuotaSettings = () => {
 
     const saveChanges = async () => {
         try {
-            await Promise.all(tempQuotas.map(q => sql.updateQuota(q.id, q)));
+            // Identify deleted items
+            const originalCategoryQuotas = quotas.filter(q => q.category === editingCategory);
+            const deletedIds = originalCategoryQuotas
+                .filter(oq => !tempQuotas.some(tq => tq.id === oq.id))
+                .map(dq => dq.id);
+
+            // Perfrom deletions
+            for (const id of deletedIds) {
+                await sql.deleteQuota(id);
+            }
+
+            // Perform updates and insertions
+            await Promise.all(tempQuotas.map(q => {
+                const isNew = !originalCategoryQuotas.some(oq => oq.id === q.id);
+                return isNew ? sql.insertQuota(q) : sql.updateQuota(q.id, q);
+            }));
+
             toast({ title: "Success", description: `Quota rules for ${editingCategory} updated.` });
             setIsModalOpen(false);
             fetchData();
@@ -122,10 +148,15 @@ const AdminQuotaSettings = () => {
                                             <p className="text-xs text-muted-foreground italic col-span-4">No rules defined for this category.</p>
                                         ) : catQuotas.map((item) => (
                                             <div key={item.id} className="p-3 rounded-lg bg-secondary/40 border border-border/50 group hover:border-primary/30 transition-colors">
-                                                <div className="flex items-center gap-2 mb-2">
-                                                    < Wheat className="w-4 h-4 text-accent" />
-                                                    <span className="text-sm font-semibold">{item.itemName}</span>
-                                                </div>
+                                                 <div className="flex items-center gap-2 mb-2">
+                                                     <div className="p-1 rounded bg-background/50">
+                                                        {(() => {
+                                                            const Icon = getItemIcon(item.itemName);
+                                                            return <Icon className="w-4 h-4 text-accent" />;
+                                                        })()}
+                                                     </div>
+                                                     <span className="text-sm font-semibold">{item.itemName}</span>
+                                                 </div>
                                                 <div className="flex flex-col gap-1">
                                                     <div className="flex justify-between text-xs">
                                                         <span className="text-muted-foreground">Allocation:</span>
@@ -152,35 +183,81 @@ const AdminQuotaSettings = () => {
                         <DialogTitle>Edit Quota Rules: {editingCategory}</DialogTitle>
                     </DialogHeader>
                     <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto pr-2">
-                        {tempQuotas.map((q) => (
-                            <div key={q.id} className="p-4 rounded-lg bg-secondary/20 border border-border flex flex-col gap-3">
-                                <div className="flex items-center justify-between">
-                                    <span className="font-bold text-primary flex items-center gap-2">
-                                        <Wheat className="w-4 h-4" /> {q.itemName}
-                                    </span>
-                                    <Badge variant="outline" className="text-[10px]">{q.unit}</Badge>
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-1.5">
-                                        <Label className="text-xs">Allocation Amount</Label>
-                                        <Input
-                                            type="number"
-                                            value={q.amount}
-                                            onChange={(e) => handleUpdateTemp(q.id, "amount", parseFloat(e.target.value))}
-                                        />
+                        {tempQuotas.map((q) => {
+                            const Icon = getItemIcon(q.itemName);
+                            return (
+                                <div key={q.id} className="p-4 rounded-lg bg-secondary/20 border border-border flex flex-col gap-3 group relative">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-3 w-full">
+                                            <div className="p-1.5 rounded bg-background">
+                                                <Icon className="w-4 h-4 text-primary" />
+                                            </div>
+                                            <Input 
+                                                className="h-8 font-bold border-none bg-transparent p-0 focus-visible:ring-0 w-32"
+                                                value={q.itemName}
+                                                onChange={(e) => handleUpdateTemp(q.id, "itemName", e.target.value)}
+                                                placeholder="Item Name"
+                                            />
+                                            <Input 
+                                                className="h-7 text-[10px] w-16 bg-background/50"
+                                                value={q.unit}
+                                                onChange={(e) => handleUpdateTemp(q.id, "unit", e.target.value)}
+                                                placeholder="Unit (kg)"
+                                            />
+                                        </div>
+                                        <Button 
+                                            variant="ghost" 
+                                            size="icon" 
+                                            className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                                            onClick={() => setTempQuotas(prev => prev.filter(t => t.id !== q.id))}
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                        </Button>
                                     </div>
-                                    <div className="space-y-1.5">
-                                        <Label className="text-xs">Price (per {q.unit.split('/')[0]})</Label>
-                                        <Input
-                                            type="number"
-                                            step="0.1"
-                                            value={q.price}
-                                            onChange={(e) => handleUpdateTemp(q.id, "price", parseFloat(e.target.value))}
-                                        />
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-1.5">
+                                            <Label className="text-xs text-muted-foreground font-bold uppercase tracking-wider">Allocation</Label>
+                                            <Input
+                                                type="number"
+                                                value={q.amount}
+                                                onChange={(e) => handleUpdateTemp(q.id, "amount", parseFloat(e.target.value))}
+                                                className="h-9"
+                                            />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <Label className="text-xs text-muted-foreground font-bold uppercase tracking-wider">Price (₹)</Label>
+                                            <Input
+                                                type="number"
+                                                step="0.1"
+                                                value={q.price}
+                                                onChange={(e) => handleUpdateTemp(q.id, "price", parseFloat(e.target.value))}
+                                                className="h-9"
+                                            />
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
+
+                        <Button 
+                            variant="outline" 
+                            className="w-full border-dashed border-2 hover:border-primary/50 hover:bg-primary/5"
+                            onClick={() => {
+                                setTempQuotas(prev => [
+                                    ...prev, 
+                                    { 
+                                        id: crypto.randomUUID(), 
+                                        category: editingCategory!, 
+                                        itemName: "", 
+                                        amount: 0, 
+                                        unit: "kg", 
+                                        price: 0 
+                                    }
+                                ]);
+                            }}
+                        >
+                            <Plus className="w-4 h-4 mr-2" /> Add New Item to Quota
+                        </Button>
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setIsModalOpen(false)}>Cancel</Button>

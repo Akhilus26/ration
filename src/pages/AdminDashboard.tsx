@@ -39,26 +39,30 @@ const AdminDashboard = () => {
   useEffect(() => {
     const fetchData = async () => {
       const users = await sql.getAllUsers();
-      const beneficiaries = users.filter((u) => u.role === "beneficiary");
-      const cats = await sql.getCategoryCounts();
+      const beneficiaries = users.filter((u) => u.role?.toLowerCase() === "beneficiary");
       const shops = await sql.getAllShops();
-      const orders = await sql.getAllOrders();
       const allStock = await sql.getAllStock();
+      const allPurchases = await sql.getAllPurchases();
 
-      // Monthly Distribution Calculation
+      // Monthly Distribution Calculation from individual purchases
       const now = new Date();
       const thisMonth = now.getMonth();
       const thisYear = now.getFullYear();
       
       let monthlyVolume = 0;
-      orders.forEach(order => {
-          const orderDate = new Date(order.date);
-          if (orderDate.getMonth() === thisMonth && orderDate.getFullYear() === thisYear) {
-              order.items.forEach((item: any) => {
-                  monthlyVolume += (item.quantity || 0);
-              });
+      allPurchases.forEach(purchase => {
+          const pDate = new Date(purchase.date);
+          if (pDate.getMonth() === thisMonth && pDate.getFullYear() === thisYear) {
+              monthlyVolume += (purchase.amount || 0);
           }
       });
+
+      // Calculate category counts locally
+      const cats = {
+        AAY: beneficiaries.filter(u => u.category === "AAY").length,
+        PHH: beneficiaries.filter(u => u.category === "PHH").length,
+        NPHH: beneficiaries.filter(u => u.category === "NPHH").length,
+      };
 
       // Low Stock Alerts (Shops with any item < 20kg/L)
       const shopStockMap: Record<string, any[]> = {};
@@ -76,7 +80,7 @@ const AdminDashboard = () => {
       setCounts({
         total: beneficiaries.length,
         ...cats,
-        activeShops: shops.filter(s => s.status === "ready").length,
+        activeShops: shops.filter(s => s.status === "ready" || s.status === "approved").length,
         monthlyTotal: monthlyVolume,
         lowStockShops: lowStockCount
       });

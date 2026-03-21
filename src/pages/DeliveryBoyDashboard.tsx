@@ -258,7 +258,7 @@ const DeliveryBoyDashboard = () => {
                     <CardContent className="p-6">
                         <p className="text-xs font-bold text-primary uppercase tracking-wider mb-1">Current Batch Slot</p>
                         <p className="text-3xl font-black text-foreground">
-                            {new Date().getHours()}:00 - {new Date().getHours() + 1}:00
+                            {(new Date().getHours() - 1).toString().padStart(2, '0')}:00 - {new Date().getHours().toString().padStart(2, '0')}:00
                         </p>
                         {timeLeft && (
                             <p className={`text-[10px] font-bold mt-2 flex items-center gap-1 ${timeLeft.m < 10 ? 'text-amber-600' : 'text-muted-foreground'}`}>

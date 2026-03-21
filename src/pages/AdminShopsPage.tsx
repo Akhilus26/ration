@@ -1,4 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,6 +29,8 @@ import { sql, type Shop, type User } from "@/lib/db";
 import { Store, MapPin, Users, Plus, Globe, Settings2, Trash2, CheckCircle2, XCircle, Shield } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
+import { Info } from "lucide-react";
+
 
 const AdminShopsPage = () => {
     const { toast } = useToast();
@@ -36,6 +41,11 @@ const AdminShopsPage = () => {
     const [editingShop, setEditingShop] = useState<Shop | null>(null);
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [shopToDelete, setShopToDelete] = useState<Shop | null>(null);
+    const [selectedShopForDetails, setSelectedShopForDetails] = useState<Shop | null>(null);
+    const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+    const detailMapRef = useRef<HTMLDivElement>(null);
+    const detailMapInstance = useRef<any>(null);
+
 
     const [formData, setFormData] = useState({
         name: "",
@@ -230,6 +240,54 @@ const AdminShopsPage = () => {
         }
     };
 
+    useEffect(() => {
+        if (isDetailsModalOpen && selectedShopForDetails && detailMapRef.current) {
+            const timer = setTimeout(() => {
+                if (!detailMapRef.current) return;
+                
+                if (detailMapInstance.current) {
+                    detailMapInstance.current.remove();
+                    detailMapInstance.current = null;
+                }
+
+                try {
+                    const lat = selectedShopForDetails.lat || 28.6139;
+                    const lng = selectedShopForDetails.lng || 77.2090;
+                    
+                    const map = L.map(detailMapRef.current).setView([lat, lng], 15);
+                    detailMapInstance.current = map;
+
+                    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+                        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+                    }).addTo(map);
+
+                    L.marker([lat, lng]).addTo(map)
+                        .bindPopup(`<b>${selectedShopForDetails.name}</b>`)
+                        .openPopup();
+                    
+                    setTimeout(() => {
+                        map.invalidateSize();
+                    }, 500);
+                } catch (err) {
+                    console.error("Map initialization error:", err);
+                }
+            }, 500);
+
+            return () => {
+                clearTimeout(timer);
+                if (detailMapInstance.current) {
+                    detailMapInstance.current.remove();
+                    detailMapInstance.current = null;
+                }
+            };
+        }
+    }, [isDetailsModalOpen, selectedShopForDetails]);
+
+    const openDetailsModal = (shop: Shop) => {
+        setSelectedShopForDetails(shop);
+        setIsDetailsModalOpen(true);
+    };
+
     const getShopkeeperName = (id?: string) => {
         if (!id || id === "none") return "Unassigned";
         const sk = shopkeepers.find(u => u.id === id);
@@ -417,6 +475,14 @@ const AdminShopsPage = () => {
                                                 <TableCell className="text-right pr-6">
                                                     <div className="flex justify-end gap-2">
                                                         <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            className="text-primary hover:bg-primary/10 gap-1"
+                                                            onClick={() => openDetailsModal(shop)}
+                                                        >
+                                                            <Info className="w-4 h-4" /> View Details
+                                                        </Button>
+                                                        <Button
                                                             size="sm"
                                                             className="bg-emerald-500 hover:bg-emerald-600 text-white gap-1"
                                                             onClick={() => handleApproveShop(shop.id)}
@@ -582,7 +648,117 @@ const AdminShopsPage = () => {
                 </DialogContent>
             </Dialog>
 
+            <Dialog open={isDetailsModalOpen} onOpenChange={setIsDetailsModalOpen}>
+                <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Store className="w-5 h-5 text-primary" />
+                            Shop Application Details
+                        </DialogTitle>
+                    </DialogHeader>
+                    
+                    {selectedShopForDetails && (
+                        <div className="space-y-6 py-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="space-y-4">
+                                    <div>
+                                        <Label className="text-xs text-muted-foreground uppercase font-semibold">Shop Name</Label>
+                                        <div className="font-bold text-lg">{selectedShopForDetails.name}</div>
+                                        <Badge variant={selectedShopForDetails.type === "ration" ? "default" : "outline"} className="mt-1">
+                                            {selectedShopForDetails.type === "ration" ? "Fair Price Ration Shop" : "Locality Extra Shop"}
+                                        </Badge>
+                                    </div>
+                                    
+                                    <div>
+                                        <Label className="text-xs text-muted-foreground uppercase font-semibold">Address</Label>
+                                        <div className="text-sm border rounded-md p-3 bg-secondary/10 flex items-start gap-2">
+                                            <MapPin className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+                                            {selectedShopForDetails.address}
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <Label className="text-xs text-muted-foreground uppercase font-semibold">Service Areas</Label>
+                                        <div className="flex flex-wrap gap-2 mt-1">
+                                            {selectedShopForDetails.serviceAreas.map(area => (
+                                                <Badge key={area} variant="outline" className="bg-background">{area}</Badge>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <Label className="text-xs text-muted-foreground uppercase font-semibold">Applicant / Manager</Label>
+                                        <div className="flex items-center gap-3 mt-1 p-3 border rounded-md">
+                                            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                                                <Users className="w-5 h-5 text-primary" />
+                                            </div>
+                                            <div>
+                                                <div className="font-semibold">{selectedShopForDetails.shopkeeperName || getShopkeeperName(selectedShopForDetails.shopkeeperId)}</div>
+                                                <div className="text-xs text-muted-foreground">{selectedShopForDetails.gmail || "No email provided"}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <div>
+                                        <Label className="text-xs text-muted-foreground uppercase font-semibold">Location coordinates</Label>
+                                        <div className="text-xs font-mono bg-muted p-2 rounded flex justify-between">
+                                            <span>Lat: {selectedShopForDetails.lat.toFixed(6)}</span>
+                                            <span>Lng: {selectedShopForDetails.lng.toFixed(6)}</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="h-[250px] w-full rounded-lg overflow-hidden border border-border relative z-0">
+                                        <div ref={detailMapRef} style={{ height: "100%", width: "100%" }} />
+                                    </div>
+                                    
+                                    <Button 
+                                        variant="outline" 
+                                        size="sm" 
+                                        className="w-full gap-2"
+                                        onClick={() => window.open(`https://www.google.com/maps?q=${selectedShopForDetails.lat},${selectedShopForDetails.lng}`, '_blank')}
+                                    >
+                                        <Globe className="w-4 h-4" /> View on Google Maps
+                                    </Button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    
+                    <DialogFooter className="flex-row justify-between gap-4">
+                        <Button variant="outline" onClick={() => setIsDetailsModalOpen(false)}>Close</Button>
+                        <div className="flex gap-2">
+                            <Button
+                                variant="outline"
+                                className="text-destructive hover:bg-destructive/10"
+                                onClick={() => {
+                                    if (selectedShopForDetails) {
+                                        handleRejectShop(selectedShopForDetails.id);
+                                        setIsDetailsModalOpen(false);
+                                    }
+                                }}
+                            >
+                                <XCircle className="w-4 h-4 mr-2" /> Reject Application
+                            </Button>
+                            <Button
+                                className="bg-emerald-500 hover:bg-emerald-600 text-white"
+                                onClick={() => {
+                                    if (selectedShopForDetails) {
+                                        handleApproveShop(selectedShopForDetails.id);
+                                        setIsDetailsModalOpen(false);
+                                    }
+                                }}
+                            >
+                                <CheckCircle2 className="w-4 h-4 mr-2" /> Approve Shop
+                            </Button>
+                        </div>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             <Card className="border-primary/20 bg-primary/5">
+
                 <CardContent className="py-4 flex items-start gap-3">
                     <Globe className="w-5 h-5 text-primary mt-0.5" />
                     <div className="text-sm">

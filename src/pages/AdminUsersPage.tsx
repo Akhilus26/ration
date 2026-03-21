@@ -20,7 +20,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { sql, type User } from "@/lib/db";
-import { User as UserIcon, Mail, Shield, UserCheck, Users, Trash2, Edit2, MapPin, Search } from "lucide-react";
+import { User as UserIcon, Mail, Shield, UserCheck, Users, Trash2, Edit2, MapPin, Search, Truck } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
 
@@ -90,6 +90,8 @@ const AdminUsersPage = () => {
                 return <Badge className="bg-primary hover:bg-primary/90"><Shield className="w-3 h-3 mr-1" /> Admin</Badge>;
             case "shopkeeper":
                 return <Badge variant="secondary"><UserCheck className="w-3 h-3 mr-1" /> Shopkeeper</Badge>;
+            case "delivery_boy":
+                return <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200"><Truck className="w-3 h-3 mr-1" /> Delivery Boy</Badge>;
             default:
                 return <Badge variant="outline"><UserIcon className="w-3 h-3 mr-1" /> Beneficiary</Badge>;
         }
@@ -213,6 +215,7 @@ const AdminUsersPage = () => {
                                         <SelectContent>
                                             <SelectItem value="beneficiary">Beneficiary</SelectItem>
                                             <SelectItem value="shopkeeper">Shopkeeper</SelectItem>
+                                            <SelectItem value="delivery_boy">Delivery Boy</SelectItem>
                                             <SelectItem value="admin">Administrator</SelectItem>
                                         </SelectContent>
                                     </Select>

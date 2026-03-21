@@ -22,6 +22,7 @@ import ShopkeeperStock from "./pages/ShopkeeperStock";
 import ShopkeeperDeliveryBoys from "./pages/ShopkeeperDeliveryBoys";
 import ShopkeeperDeliveries from "./pages/ShopkeeperDeliveries";
 import ShopkeeperOrders from "./pages/ShopkeeperOrders";
+import ShopkeeperSettings from "./pages/ShopkeeperSettings";
 import DeliveryBoyDashboard from "./pages/DeliveryBoyDashboard";
 import PurchasePage from "./pages/PurchasePage";
 import DeliveryTracking from "./pages/DeliveryTracking";
@@ -67,6 +68,7 @@ const App = () => (
             <Route path="/shopkeeper/orders" element={<DashboardLayout><ShopkeeperOrders /></DashboardLayout>} />
             <Route path="/shopkeeper/deliveries" element={<DashboardLayout><ShopkeeperDeliveries /></DashboardLayout>} />
             <Route path="/shopkeeper/notifications" element={<DashboardLayout><NotificationsPage /></DashboardLayout>} />
+            <Route path="/shopkeeper/settings" element={<DashboardLayout><ShopkeeperSettings /></DashboardLayout>} />
 
             {/* Delivery Boy */}
             <Route path="/delivery-boy" element={<DashboardLayout><DeliveryBoyDashboard /></DashboardLayout>} />

@@ -27,9 +27,13 @@ const AdminAnalytics = () => {
       try {
         const users = await sql.getAllUsers();
         const orders = await sql.getAllOrders();
-        const cats = await sql.getCategoryCounts();
 
-        const beneficiaries = users.filter((u) => u.role === "beneficiary").length;
+        const beneficiaries = users.filter((u) => u.role?.toLowerCase() === "beneficiary");
+        const cats = {
+            AAY: beneficiaries.filter((u: any) => u.category === "AAY").length,
+            PHH: beneficiaries.filter((u: any) => u.category === "PHH").length,
+            NPHH: beneficiaries.filter((u: any) => u.category === "NPHH").length,
+        };
         const delivered = orders.filter((o) => o.status === "completed" || o.deliveryStatus === "delivered").length;
         const pending = orders.filter((o) => o.status === "pending" || o.deliveryStatus === "assigned").length;
 
@@ -38,7 +42,7 @@ const AdminAnalytics = () => {
         }, 0);
 
         setData({
-          totalUsers: beneficiaries,
+          totalUsers: beneficiaries.length,
           totalOrders: orders.length,
           deliveredOrders: delivered,
           pendingOrders: pending,

@@ -225,7 +225,7 @@ export const seedShops = async () => {
         lat: 28.6289,
         lng: 77.2150,
         serviceAreas: ["110001", "110002", "Central Delhi"],
-        status: "approved",
+        status: "ready",
         type: "ration"
       },
       {
@@ -235,7 +235,7 @@ export const seedShops = async () => {
         lat: 28.6814,
         lng: 77.2225,
         serviceAreas: ["110007", "110008", "North Delhi"],
-        status: "approved",
+        status: "ready",
         type: "ration"
       },
       {
@@ -245,7 +245,7 @@ export const seedShops = async () => {
         lat: 28.5823,
         lng: 77.0500,
         serviceAreas: ["110075", "110078", "West Delhi"],
-        status: "approved",
+        status: "ready",
         type: "ration"
       }
     ];
@@ -344,6 +344,10 @@ export const sql = {
   insertPurchase: async (purchase: Purchase) => {
     return await setDoc(doc(db, "purchases", purchase.id), purchase);
   },
+  getAllPurchases: async () => {
+    const snapshot = await getDocs(collection(db, "purchases"));
+    return mapDocs(snapshot);
+  },
   getAllUsers: async () => {
     const snapshot = await getDocs(collection(db, "users"));
     return mapDocs(snapshot);
@@ -364,13 +368,13 @@ export const sql = {
     return mapDocs(snapshot);
   },
   getCategoryCounts: async () => {
-    const q = query(collection(db, "users"), where("role", "==", "beneficiary"));
-    const snapshot = await getDocs(q);
+    const snapshot = await getDocs(collection(db, "users"));
     const users = mapDocs(snapshot);
+    const beneficiaries = users.filter((u: any) => u.role?.toLowerCase() === "beneficiary");
     return {
-      AAY: users.filter((u: any) => u.category === "AAY").length,
-      PHH: users.filter((u: any) => u.category === "PHH").length,
-      NPHH: users.filter((u: any) => u.category === "NPHH").length,
+      AAY: beneficiaries.filter((u: any) => u.category === "AAY").length,
+      PHH: beneficiaries.filter((u: any) => u.category === "PHH").length,
+      NPHH: beneficiaries.filter((u: any) => u.category === "NPHH").length,
     };
   },
   getAllShops: async () => {
@@ -525,7 +529,13 @@ export const sql = {
     return mapDocs(snapshot);
   },
   updateQuota: async (id: string, quota: Partial<Quota>) => {
-    return await updateDoc(doc(db, "quotas", id), quota);
+    return await updateDoc(doc(db, "quotas", id), clean(quota));
+  },
+  insertQuota: async (quota: Quota) => {
+    return await setDoc(doc(db, "quotas", quota.id), clean(quota));
+  },
+  deleteQuota: async (id: string) => {
+    return await deleteDoc(doc(db, "quotas", id));
   },
   getSystemSettings: async () => {
     const docRef = doc(db, "system_metadata", "settings");

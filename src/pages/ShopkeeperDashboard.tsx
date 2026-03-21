@@ -14,6 +14,7 @@ import {
   MapPin,
   Store,
   Users,
+  Settings,
 } from "lucide-react";
 
 const anim = {
@@ -133,6 +134,7 @@ const ShopkeeperDashboard = () => {
                   { label: "View Orders", icon: ClipboardList, url: "/shopkeeper/orders" },
                   { label: "Deliveries", icon: Truck, url: "/shopkeeper/deliveries" },
                   { label: "Sales Report", icon: TrendingUp, url: "/shopkeeper/notifications" },
+                  { label: "Shop Settings", icon: Settings, url: "/shopkeeper/settings" },
                 ].map((action) => (
                   <Button
                     key={action.label}

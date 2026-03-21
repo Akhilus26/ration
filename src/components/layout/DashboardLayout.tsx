@@ -53,6 +53,7 @@ const roleMenus = {
     { title: "Orders", url: "/shopkeeper/orders", icon: ClipboardList },
     { title: "Deliveries", url: "/shopkeeper/deliveries", icon: Truck },
     { title: "Notifications", url: "/shopkeeper/notifications", icon: Bell },
+    { title: "Shop Settings", url: "/shopkeeper/settings", icon: Settings },
   ],
   admin: [
     { title: "Dashboard", url: "/admin", icon: LayoutDashboard },
